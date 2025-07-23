@@ -1,0 +1,9 @@
+original_column_name,column_name,column_description,data_format,value_description
+critn_date,creation date,"created year, month and date explained as 8 yyyymmdd digits",text,
+fact_nm,factory name,name of factory,text,
+line_cd,line code,grouped process line code,text,
+line_nm,line name,grouped process line name,text,
+item_cd,item code,item code name,text,
+finished_qty,finished quantity,quantity of finished products ,integer,
+reg_id,registration id,account id who registrated this data,text,
+reg_dts,registration datetimes,datetime when this data is registrated,text,

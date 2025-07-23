@@ -1,0 +1,52 @@
+[project]
+name = "milvus-test"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "jupyter>=1.1.1",
+    "langchain>=0.3.25",
+    "langchain-milvus>=0.2.0",
+    "langchain-ollama>=0.3.3",
+    "langchain-openai>=0.3.18",
+    "openpyxl>=3.1.5",
+    "pre-commit>=4.2.0",
+    "pyarrow>=20.0.0",
+    "pymilvus[model]>=2.5.10",
+    "pytest>=8.3.5",
+    "ruff>=0.11.12",
+    "sqlglot>=26.20.0",
+    "tabulate>=0.9.0",
+    "tiktoken>=0.9.0",
+    "torch>=2.7.0"
+]
+
+[dependency-groups]
+tutorials = [
+    "dotenv>=0.9.9",
+    "ollama>=0.4.8",
+    "openai>=1.79.0",
+    "pymilvus>=2.5.8",
+    "requests>=2.32.3",
+    "tqdm>=4.67.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["vmilvus"]
+
+[tool.uv.sources]
+vmilvus = [
+    { path = ".", editable = true }
+]
+
+[tool.ruff]
+fix = false
+line-length = 120
+lint.select = ["A", "B", "C4", "E", "F", "I", "N", "W"]
+lint.ignore = ["C901", "D", "W191", "N815", "B008", "N812", "B904"]
+lint.exclude = [".venv/*", "protos/*", ".teamcity/*", "doc/*", "prompts.py"]

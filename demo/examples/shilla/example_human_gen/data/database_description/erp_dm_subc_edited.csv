@@ -1,0 +1,4 @@
+original_column_name,column_name,column_description,data_format,value_description
+subl_code,sub level code,sub level code which contains multiple sub categories,integer,"706 : process of production, 776 : factory name, 108 : process when defective production produced"
+subc_code,sub category code,sub category code which should be used with line code,integer,
+subc_name,sub category name,sub category name which should be used with line name or factory name,text,
