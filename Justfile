@@ -33,6 +33,7 @@ gen-env-file:
 prepare-for-build-rag:
     ollama pull mxbai-embed-large
     ollama pull gemma3:latest
+    brew install wget
     wget https://github.com/milvus-io/milvus-docs/releases/download/v2.4.6-preview/milvus_docs_2.4.x_en.zip
     unzip -q milvus_docs_2.4.x_en.zip -d milvus_docs
     . {{ VENV }}/bin/activate && \
