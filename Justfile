@@ -49,3 +49,14 @@ image-search-dataset:
     rm -r reverse_image_search.zip && \
     cd .. && \
     rm -r reverse_image_search.zip
+
+# Multi modal dataset
+multi-modal-dataset:
+    uv pip install -e FlagEmbedding && \
+    wget https://github.com/milvus-io/bootcamp/releases/download/data/amazon_reviews_2023_subset.tar.gz && \
+    mkdir -p amazon_reviews_2023_subset && \
+    mv amazon_reviews_2023_subset.tar.gz ./amazon_reviews_2023_subset/amazon_reviews_2023_subset.tar.gz && \
+    cd amazon_reviews_2023_subset && \
+    tar -xzf amazon_reviews_2023_subset.tar.gz && \
+    rm -r amazon_reviews_2023_subset.tar.gz && \
+    wget https://huggingface.co/BAAI/bge-visualized/resolve/main/Visualized_base_en_v1.5.pth

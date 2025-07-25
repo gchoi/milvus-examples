@@ -22,3 +22,4 @@ milvus_docs/
 *.db
 *.db.lock
 image-search-dataset/
+amazon_reviews_2023_subset/
