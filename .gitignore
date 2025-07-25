@@ -21,3 +21,4 @@ volumes/
 milvus_docs/
 *.db
 *.db.lock
+image-search-dataset/

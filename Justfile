@@ -38,3 +38,14 @@ prepare-for-build-rag:
     unzip -q milvus_docs_2.4.x_en.zip -d milvus_docs
     . {{ VENV }}/bin/activate && \
     uv sync --group tutorials
+
+# Image search dataseet
+image-search-dataset:
+    wget https://github.com/milvus-io/pymilvus-assets/releases/download/imagedata/reverse_image_search.zip && \
+    mkdir -p image-search-dataset && \
+    cp ./reverse_image_search.zip ./image-search-dataset/reverse_image_search.zip && \
+    cd image-search-dataset && \
+    unzip -q -o reverse_image_search.zip && \
+    rm -r reverse_image_search.zip && \
+    cd .. && \
+    rm -r reverse_image_search.zip
