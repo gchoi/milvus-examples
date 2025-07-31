@@ -52,7 +52,6 @@ image-search-dataset:
 
 # Multi modal dataset
 multi-modal-dataset:
-    uv pip install -e FlagEmbedding && \
     wget https://github.com/milvus-io/bootcamp/releases/download/data/amazon_reviews_2023_subset.tar.gz && \
     mkdir -p amazon_reviews_2023_subset && \
     mv amazon_reviews_2023_subset.tar.gz ./amazon_reviews_2023_subset/amazon_reviews_2023_subset.tar.gz && \
