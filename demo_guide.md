@@ -46,7 +46,7 @@ just venv
 
 ### 3.2. tutorials
 
-> [Build-RAG.ipynb](./demo/tutorials/Build-RAG.ipynb) 실행하여 tutorial을 실행해봅니다.
+> [Build-RAG.ipynb](demo/notebooks/Build-RAG.ipynb) 실행하여 tutorial을 실행해봅니다.
 
 ### 3.3. Shilla example
 

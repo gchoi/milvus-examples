@@ -29,7 +29,7 @@ venv: install-uv
 gen-env-file:
 	cp ./.env.example ./.env
 
-# Prepare the data Build-RAG.ipynb for tutorials
+# Prepare the data Build-RAG.ipynb for notebooks
 prepare-for-build-rag:
     ollama pull mxbai-embed-large
     ollama pull gemma3:latest
