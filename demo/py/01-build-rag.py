@@ -15,6 +15,10 @@ from milvus.model import Model
 
 
 def main():
+    ########################################################################
+    # Configurations
+    ########################################################################
+
     # -- Get configurations
     config_path = os.path.join(os.path.dirname(__file__), "configs", "config.yaml")
     configs = get_configurations(config_yaml_path=config_path)
@@ -89,10 +93,9 @@ def main():
     print(json.dumps(retrieved_lines_with_distances, indent=4))
 
     ########################################################################
-    # Build RAG
+    # Use LLM to get a RAG response
     ########################################################################
 
-    # -- Use LLM to get a RAG response
     context = "\n".join([line_with_distance[0] for line_with_distance in retrieved_lines_with_distances])
     SYSTEM_PROMPT = """
         Human: You are an AI assistant. You are able to find answers to the questions from the contextual passage 
