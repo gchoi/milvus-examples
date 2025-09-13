@@ -1,0 +1,15 @@
+# -- Milvus Configurations
+milvus:
+    host: localhost
+    port: 19530
+    collection_name: my_rag_collection
+    search:
+        limit: 5
+        metric_type: IP
+
+# -- Model Configurations
+model:
+    platform: ollama    # openai | google | ollama
+    embedding_model: embeddinggemma # embeddinggemma | mxbai-embed-large
+    chat_model: gemma3:4b
+

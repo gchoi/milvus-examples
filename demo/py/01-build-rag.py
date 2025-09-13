@@ -1,42 +1,46 @@
 import os
 from glob import glob
 import json
-from dotenv import load_dotenv
 
-from openai import OpenAI
 from tqdm import tqdm
 
 from milvus.client.utils import (
     drop_collection,
     create_collection,
     insert,
-search
+    search
 )
-
-
-load_dotenv()
-os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
-
-# -- Milvus configurations
-URI = "http://localhost:19530"
-COLLECTION_NAME = "my_rag_collection"
-
-# -- Model configurations
-EMBEDDING_MODEL = "text-embedding-3-small"
-CHAT_MODEL = "gpt-3.5-turbo"
-
-
-def emb_text(client, text):
-    return (
-        client.embeddings.create(input=text, model=EMBEDDING_MODEL)
-        .data[0]
-        .embedding
-    )
+from milvus.utils import get_configurations
+from milvus.model import Model
 
 
 def main():
+    # -- Get configurations
+    config_path = os.path.join(os.path.dirname(__file__), "configs", "config.yaml")
+    configs = get_configurations(config_yaml_path=config_path)
+
+    # -- Milvus configurations
+    uri = f"{configs.get("milvus").get("host")}:{configs.get("milvus").get("port")}"
+    if not uri.startswith("http://"):
+        uri = f"http://{uri}"
+    collection_name = configs.get("milvus").get("collection_name")
+
+    # -- Model configurations
+    model = Model(
+        platform=configs.get("model").get("platform"),
+        embedding_model=configs.get("model").get("embedding_model"),
+        chat_model=configs.get("model").get("chat_model")
+    )
+
+    ########################################################################
+    # Build RAG
+    ########################################################################
+
     # -- Drop collection if exists
-    drop_collection(uri=URI, collection_name=COLLECTION_NAME)
+    drop_collection(
+        uri=uri,
+        collection_name=collection_name
+    )
 
     # -- Get embeddings
     text_lines = []
@@ -45,15 +49,12 @@ def main():
             file_text = file.read()
         text_lines += file_text.split("# ")
 
-    openai_client = OpenAI()
-    test_embedding = emb_text(client=openai_client, text="This is a test")
-    embedding_dim = len(test_embedding)
-    print(f"Embedding dimension: {embedding_dim}")
+    embedding_dim = model.get_embedding_dim()
 
     # -- Create a collection
     create_collection(
-        uri=URI,
-        collection_name=COLLECTION_NAME,
+        uri=uri,
+        collection_name=collection_name,
         embedding_dim=embedding_dim,
         metric_type="IP",
         consistency_level="Bounded",
@@ -66,29 +67,30 @@ def main():
         data.append(
             {
                 "id": i,
-                "vector": emb_text(client=openai_client, text=line),
+                "vector": model.get_text_embedding(text=line),
                 "text": line
             }
         )
-    insert(uri=URI, collection_name=COLLECTION_NAME, data=data)
-
-    ########################################################################
-    # Build RAG
-    ########################################################################
+    insert(uri=uri, collection_name=collection_name, data=data)
 
     # -- Retrieve data for a query
     question = "How is data stored in milvus?"
 
     search_res = search(
-        uri=URI,
-        collection_name=COLLECTION_NAME,
-        query_embeddings=[emb_text(client=openai_client, text=question)],
-        limit=3,
-        metric_type="IP"
+        uri=uri,
+        collection_name=collection_name,
+        query_embeddings=[model.get_text_embedding(text=question)],
+        limit=configs.get("milvus").get("search").get("limit"),
+        metric_type=configs.get("milvus").get("search").get("metric_type"),
     )
 
     retrieved_lines_with_distances = [(res["entity"]["text"], res["distance"]) for res in search_res[0]]
+    print("Search results:")
     print(json.dumps(retrieved_lines_with_distances, indent=4))
+
+    ########################################################################
+    # Build RAG
+    ########################################################################
 
     # -- Use LLM to get a RAG response
     context = "\n".join([line_with_distance[0] for line_with_distance in retrieved_lines_with_distances])
@@ -107,14 +109,9 @@ def main():
         </question>
     """
 
-    response = openai_client.chat.completions.create(
-        model=CHAT_MODEL,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": USER_PROMPT},
-        ],
-    )
-    print(response.choices[0].message.content)
+    response = model.process_query(system_prompt=SYSTEM_PROMPT, user_prompt=USER_PROMPT)
+    print(f"Question: {question}")
+    print(f"Response: {response}")
     return
 
 
