@@ -60,7 +60,7 @@ def main():
         uri=uri,
         collection_name=collection_name,
         embedding_dim=embedding_dim,
-        metric_type="IP",
+        metric_type=configs.get("milvus").get("search").get("metric_type"),
         consistency_level="Bounded",
         overwrite=True,
     )
