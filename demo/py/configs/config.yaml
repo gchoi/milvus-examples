@@ -2,7 +2,7 @@
 milvus:
     host: localhost
     port: 19530
-    collection_name: my_rag_collection
+    collection_name: semantic_search
     search:
         limit: 5
         metric_type: IP

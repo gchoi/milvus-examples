@@ -24,7 +24,7 @@ class Model:
         self.chat_model = chat_model
         return
 
-    def set_model(self):
+    def set_model(self) -> None:
         match self.platform.lower():
             case "openai":
                 os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
@@ -52,7 +52,7 @@ class Model:
             case _:
                 raise ValueError(f"Unsupported platform: {self.platform}")
 
-    def get_embedding_dim(self):
+    def get_embedding_dim(self) -> int:
         test_embedding = self.get_text_embedding(text="test")
 
         dim = np.array(test_embedding).shape
@@ -65,7 +65,7 @@ class Model:
         logger.info(f"Embedding dimension: {embedding_dim}")
         return embedding_dim
 
-    def process_query(self, system_prompt: str, user_prompt: str):
+    def process_query(self, system_prompt: str, user_prompt: str) -> str:
         match self.platform.lower():
             case "openai":
                 response = OpenAI().chat.completions.create(

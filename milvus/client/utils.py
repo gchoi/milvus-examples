@@ -1,6 +1,13 @@
-from typing import List, Dict
+from typing import List, Dict, Union, Optional
 
-from pymilvus import MilvusClient
+from pymilvus import (
+    MilvusClient,
+    DataType,
+    Function,
+    FunctionType,
+    AnnSearchRequest,
+    RRFRanker,
+)
 
 from ..conf import Logger
 
@@ -8,7 +15,7 @@ from ..conf import Logger
 logger = Logger(env="dev")
 
 
-def drop_collection(uri: str, collection_name: str):
+def drop_collection(uri: str, collection_name: str) -> None:
     """
         Drop Collection
 
@@ -31,10 +38,11 @@ def create_collection(
     uri: str,
     collection_name: str,
     embedding_dim: int,
-    metric_type: str = "IP",
     consistency_level: str = "Bounded",
-    overwrite: bool = False
-):
+    overwrite: bool = False,
+    collection_type: str = "semantic_search",
+    vector_search_metric_type: str = "IP"
+) -> None:
     """
         Create Collection
 
@@ -45,28 +53,98 @@ def create_collection(
                 milvus에 지정할 collection_name 객체.
             embedding_dim (int):
                 Embedding dimension.
-            metric_type (str):
-                Metric type. (default: ``IP``). Supported types: "IP", "L2", "HAMMING", "JACCARD", "TANIMOTO".
             consistency_level (str):
                 Consistency level. (default: ``Bounded``). Supported levels: "Strong", "Session", "Bounded", "Eventually".
             overwrite (bool):
                 collection_name에 overwrite 여부 구분자 (default: ``False``)
+            collection_type (str):
+                Collection type: (default: ``vector_search``) "semantic_search" | "full_text_search".
+                - semantic_search: only for semantic search (vector search).
+                - full_text_search: full text search or hybrid search.
+            vector_search_metric_type (str):
+                Metric type. (default: ``IP``). Supported types: "IP", "L2", "HAMMING", "JACCARD", "TANIMOTO".
     """
     if overwrite:
         drop_collection(collection_name=collection_name, uri=uri)
 
     client = MilvusClient(uri=uri, token="root:Milvus")
-    client.create_collection(
-        collection_name=collection_name,
-        dimension=embedding_dim,
-        metric_type=metric_type,
-        consistency_level=consistency_level
-    )
+
+    match collection_type:
+        case "semantic_search":
+            client.create_collection(
+                collection_name=collection_name,
+                dimension=embedding_dim,
+                metric_type=vector_search_metric_type,
+                consistency_level=consistency_level,
+            )
+
+        case "full_text_search":
+            # -- schema
+            schema = client.create_schema()
+            schema.add_field(
+                field_name="id",
+                datatype=DataType.VARCHAR,
+                is_primary=True,
+                auto_id=True,
+                max_length=100,
+            )
+            schema.add_field(
+                field_name="content",
+                datatype=DataType.VARCHAR,
+                max_length=65535,
+                analyzer_params={"tokenizer": "standard", "filter": ["lowercase"]},
+                enable_match=True,      # Enable text matching
+                enable_analyzer=True,   # Enable text analysis
+            )
+            schema.add_field(
+                field_name="sparse_vector",
+                datatype=DataType.SPARSE_FLOAT_VECTOR
+            )
+            schema.add_field(
+                field_name="dense_vector",
+                datatype=DataType.FLOAT_VECTOR,
+                dim=embedding_dim
+            )
+            schema.add_field(
+                field_name="metadata",
+                datatype=DataType.JSON
+            )
+            bm25_function = Function(
+                name="bm25",
+                function_type=FunctionType.BM25,
+                input_field_names=["content"],
+                output_field_names="sparse_vector",
+            )
+            schema.add_function(bm25_function)
+
+            # -- index params
+            index_params = MilvusClient.prepare_index_params()
+            index_params.add_index(
+                field_name="sparse_vector",
+                index_type="SPARSE_INVERTED_INDEX",
+                metric_type="BM25",
+            )
+            index_params.add_index(
+                field_name="dense_vector",
+                index_type="FLAT",
+                metric_type=vector_search_metric_type
+            )
+
+            # Create the collection
+            client.create_collection(
+                collection_name=collection_name,
+                schema=schema,
+                index_params=index_params,
+            )
+
+        case _:
+            raise ValueError(f"Unsupported collection type: {collection_type}")
+
     logger.info(f"Collection '{collection_name}' created.")
     return
 
 
-def insert(uri: str, collection_name: str, data: List[Dict]):
+def insert(uri: str, collection_name: str, data: List[Dict]) -> None:
     """
         Create Collection
 
@@ -88,10 +166,15 @@ def insert(uri: str, collection_name: str, data: List[Dict]):
 def search(
     uri: str,
     collection_name: str,
-    query_embeddings: List[List[float]],
+    queries: Union[List[List[float]], List[str]],
+    query_embeddings: Union[List[List[float]], List[str]],
     limit: int = 3,
-    metric_type: str = "IP"
-):
+    search_type: str = "semantic_search",
+    dense_search_metric_type: str = "IP",
+    sparse_search_metric_type: str = "BM25",
+    output_fields: List[str] = None,
+    anns_field: Optional[str] = None
+) -> List[List[Dict]]:
     """
         Search with embeddings.
 
@@ -100,20 +183,74 @@ def search(
                 Milvus URI.
             collection_name (str):
                 milvus에 지정할 collection_name 객체.
+            queries (Union[List[List[float]], List[str]]):
+                List of query text.
             query_embeddings (List[List[float]]):
-                Query embeddings.
+                List of query embeddings or texts.
             limit (int):
                 Number of results to return. (default: ``3``)
-            metric_type (str):
-                Metric type. (default: ``IP``)
+            search_type (str):
+                Collection type: (default: ``vector_search``) "semantic_search" | "full_text_search" | "combined_search".
+            dense_search_metric_type (str):
+                Dense metric type for vector search. (default: ``IP``)
+            sparse_search_metric_type (str):
+                Sparse metric type for text search. (default: ``BM25``)
+            output_fields (List[str]):
+                Output fields (default: ``text``).
+            anns_field (str):
+                Anns field (default: ``None``).
+
+        Returns:
+            List[List[Dict]]: List of the Pymilvus SearchResult.
     """
+    if output_fields is None:
+        output_fields = ["text"]
     client = MilvusClient(uri=uri, token="root:Milvus")
-    search_res = client.search(
-        collection_name=collection_name,
-        data=query_embeddings,
-        limit=limit,
-        search_params={"metric_type": metric_type, "params": {}},  # Inner product distance
-        output_fields=["text"],  # Return the text field
-    )
+
+    search_res = None
+    match search_type:
+        case "semantic_search":
+            search_res = client.search(
+                collection_name=collection_name,
+                data=query_embeddings,
+                limit=limit,
+                search_params={"metric_type": dense_search_metric_type, "params": {}},  # Inner product distance
+                output_fields=output_fields,  # Return the text field,
+                anns_field=anns_field
+            )
+
+        case "full_text_search":
+            search_res = client.search(
+                collection_name=collection_name,
+                data=queries,
+                anns_field="sparse_vector",
+                limit=limit,
+                output_fields=["content", "metadata"],
+            )
+
+        case "combined_search":
+            sparse_request = AnnSearchRequest(
+                data=queries,
+                anns_field="sparse_vector",
+                param={"metric_type": sparse_search_metric_type},
+                limit=limit
+            )
+            dense_request = AnnSearchRequest(
+                data=query_embeddings,
+                anns_field="dense_vector",
+                param={"metric_type": dense_search_metric_type},
+                limit=limit
+            )
+            search_res = client.hybrid_search(
+                collection_name=collection_name,
+                reqs=[sparse_request, dense_request],
+                ranker=RRFRanker(),  # Reciprocal Rank Fusion for combining results
+                limit=limit,
+                output_fields=["content", "metadata"],
+            )
+
+        case _:
+            raise ValueError(f"Unsupported collection type: {search_type}")
+
     logger.info(f"Search results: {search_res}")
     return search_res

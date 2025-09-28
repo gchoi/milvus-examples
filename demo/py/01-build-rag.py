@@ -40,12 +40,6 @@ def main():
     # Build RAG
     ########################################################################
 
-    # -- Drop collection if exists
-    drop_collection(
-        uri=uri,
-        collection_name=collection_name
-    )
-
     # -- Get embeddings
     text_lines = []
     for file_path in glob(pathname="../../milvus_docs/en/faq/*.md", recursive=True):
@@ -60,9 +54,10 @@ def main():
         uri=uri,
         collection_name=collection_name,
         embedding_dim=embedding_dim,
-        metric_type=configs.get("milvus").get("search").get("metric_type"),
         consistency_level="Bounded",
         overwrite=True,
+        collection_type="semantic_search",
+        vector_search_metric_type=configs.get("milvus").get("search").get("metric_type"),
     )
 
     # -- Insert data
@@ -83,9 +78,11 @@ def main():
     search_res = search(
         uri=uri,
         collection_name=collection_name,
+        queries=[question],
         query_embeddings=[model.get_text_embedding(text=question)],
+        search_type="semantic_search",
         limit=configs.get("milvus").get("search").get("limit"),
-        metric_type=configs.get("milvus").get("search").get("metric_type"),
+        dense_search_metric_type=configs.get("milvus").get("search").get("metric_type"),
     )
 
     retrieved_lines_with_distances = [(res["entity"]["text"], res["distance"]) for res in search_res[0]]
