@@ -8,6 +8,13 @@ from pymilvus import (
     AnnSearchRequest,
     RRFRanker,
 )
+from pymilvus import (
+    connections,
+    utility,
+    FieldSchema,
+    CollectionSchema,
+    Collection,
+)
 
 from ..conf import Logger
 
@@ -37,12 +44,14 @@ def drop_collection(uri: str, collection_name: str) -> None:
 def create_collection(
     uri: str,
     collection_name: str,
-    embedding_dim: int,
+    embedding_dim: int = 0,
+    dense_dim: int = 0,
     consistency_level: str = "Bounded",
     overwrite: bool = False,
     collection_type: str = "semantic_search",
-    vector_search_metric_type: str = "IP"
-) -> None:
+    dense_search_metric_type: str = "IP",
+    sparse_search_metric_type: str = "BM25"
+) -> Optional[Collection]:
     """
         Create Collection
 
@@ -61,20 +70,26 @@ def create_collection(
                 Collection type: (default: ``vector_search``) "semantic_search" | "full_text_search".
                 - semantic_search: only for semantic search (vector search).
                 - full_text_search: full text search or hybrid search.
-            vector_search_metric_type (str):
-                Metric type. (default: ``IP``). Supported types: "IP", "L2", "HAMMING", "JACCARD", "TANIMOTO".
+            dense_search_metric_type (str):
+                Dense metric type. (default: ``IP``). Supported types: "IP", "L2", "HAMMING", "JACCARD", "TANIMOTO".
+            sparse_search_metric_type (str):
+                Sparse metric type for text search. (default: ``BM25``)
+            dense_dim (int):
+                Dense dimension for hybrid search.
     """
     if overwrite:
         drop_collection(collection_name=collection_name, uri=uri)
 
     client = MilvusClient(uri=uri, token="root:Milvus")
 
+    collection = None
+
     match collection_type:
         case "semantic_search":
             client.create_collection(
                 collection_name=collection_name,
                 dimension=embedding_dim,
-                metric_type=vector_search_metric_type,
+                metric_type=dense_search_metric_type,
                 consistency_level=consistency_level,
             )
 
@@ -122,12 +137,12 @@ def create_collection(
             index_params.add_index(
                 field_name="sparse_vector",
                 index_type="SPARSE_INVERTED_INDEX",
-                metric_type="BM25",
+                metric_type=sparse_search_metric_type,
             )
             index_params.add_index(
                 field_name="dense_vector",
                 index_type="FLAT",
-                metric_type=vector_search_metric_type
+                metric_type=dense_search_metric_type
             )
 
             # Create the collection
@@ -137,11 +152,41 @@ def create_collection(
                 index_params=index_params,
             )
 
+        case "hybrid_search":
+            # Specify the data schema for the new Collection
+            fields = [
+                # Use an auto-generated id as a primary key
+                FieldSchema(name="pk", dtype=DataType.VARCHAR, is_primary=True, auto_id=True, max_length=100),
+                # Store the original text to retrieve based on semantically distance
+                FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=512),
+                # Milvus now supports both sparse and dense vectors,
+                # we can store each in a separate field to conduct hybrid search on both vectors
+                FieldSchema(name="sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR),
+                FieldSchema(name="dense_vector", dtype=DataType.FLOAT_VECTOR, dim=dense_dim),
+            ]
+            schema = CollectionSchema(fields)
+
+            # Create a collection (drop the old one if exists)
+            connections.connect(uri=uri)
+            collection = Collection(name=collection_name, schema=schema, consistency_level="Bounded")
+
+            # To make vector search efficient, we need to create indices for the vector fields
+            sparse_index = {
+                "index_type": "SPARSE_INVERTED_INDEX",
+                "metric_type": sparse_search_metric_type
+            }
+            collection.create_index(field_name="sparse_vector", index_params=sparse_index)
+            dense_index = {
+                "index_type": "AUTOINDEX",
+                "metric_type": dense_search_metric_type
+            }
+            collection.create_index(field_name="dense_vector", index_params=dense_index)
+
         case _:
             raise ValueError(f"Unsupported collection type: {collection_type}")
 
     logger.info(f"Collection '{collection_name}' created.")
-    return
+    return collection
 
 
 def insert(uri: str, collection_name: str, data: List[Dict]) -> None:

@@ -67,7 +67,8 @@ def main():
         consistency_level="Bounded",
         overwrite=True,
         collection_type="full_text_search",
-        vector_search_metric_type="IP"
+        vector_search_metric_type="IP",
+        sparse_search_metric_type="BM25"
     )
 
     for i, doc in enumerate(documents):
