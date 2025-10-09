@@ -1,5 +1,5 @@
 import os
-import subprocess, sys, pathlib, shlex
+import pathlib
 
 import pandas as pd
 
@@ -12,17 +12,11 @@ from pymilvus import (
     WeightedRanker,
 )
 
+from milvus.utils import run_command
+
 
 MAX_TRIALS = 10
 ROOT = pathlib.Path(__file__).resolve().parent
-
-
-def run(cmd: str):
-    print(f"\n>>> {cmd}")
-    res = subprocess.run(shlex.split(cmd), cwd=ROOT)
-    if res.returncode != 0:
-        sys.exit(res.returncode)
-    return
 
 
 def dense_search(col, query_dense_embedding, limit=10):
@@ -142,7 +136,7 @@ def main():
 
     file_path = "quora_duplicate_questions.tsv"
     if not os.path.exists(path=file_path):
-        run("wget http://qim.fs.quoracdn.net/quora_duplicate_questions.tsv")
+        run_command(cmd="wget http://qim.fs.quoracdn.net/quora_duplicate_questions.tsv", cwd=ROOT)
 
 
     ########################################################################

@@ -1,17 +1,23 @@
 import os
+import pathlib
 from glob import glob
 import json
 
 from tqdm import tqdm
 
 from milvus.client.utils import (
-    drop_collection,
     create_collection,
     insert,
     search
 )
 from milvus.utils import get_configurations
 from milvus.model import Model
+
+from milvus.utils import run_command
+
+
+ROOT = pathlib.Path(__file__).resolve().parent
+DATA_DIR = os.path.join("..", "..", "data")
 
 
 def main():
@@ -20,7 +26,7 @@ def main():
     ########################################################################
 
     # -- Get configurations
-    config_path = os.path.join(os.path.dirname(__file__), "configs", "config.yaml")
+    config_path = os.path.join(os.path.dirname(__file__), "configs", "config_build_rag.yaml")
     configs = get_configurations(config_yaml_path=config_path)
 
     # -- Milvus configurations
@@ -36,13 +42,33 @@ def main():
         chat_model=configs.get("model").get("chat_model")
     )
 
+
+    ########################################################################
+    # Download Dataset
+    ########################################################################
+
+    FILENAME = "milvus_docs_2.4.x_en.zip"
+    DATA_DEST = os.path.join(DATA_DIR, FILENAME.split(".zip")[0])
+
+    if not os.path.exists(path=DATA_DEST):
+        os.makedirs(DATA_DEST, exist_ok=True)
+        if not os.path.exists(path=ROOT / FILENAME):
+            cmd = f"wget https://github.com/milvus-io/milvus-docs/releases/download/v2.4.6-preview/{FILENAME}"
+            run_command(cmd=cmd, cwd=ROOT)
+
+        cmd = f"unzip -q -o {FILENAME} -d {DATA_DEST}"
+        run_command(cmd=cmd, cwd=ROOT)
+
+        cmd = f"rm -r {FILENAME}"
+        run_command(cmd=cmd, cwd=ROOT)
+
     ########################################################################
     # Build RAG
     ########################################################################
 
     # -- Get embeddings
     text_lines = []
-    for file_path in glob(pathname="../../milvus_docs/en/faq/*.md", recursive=True):
+    for file_path in glob(pathname=f"{DATA_DEST}/en/faq/*.md", recursive=True):
         with open(file_path, "r") as file:
             file_text = file.read()
         text_lines += file_text.split("# ")
@@ -57,7 +83,7 @@ def main():
         consistency_level="Bounded",
         overwrite=True,
         collection_type="semantic_search",
-        vector_search_metric_type=configs.get("milvus").get("search").get("metric_type"),
+        dense_search_metric_type=configs.get("milvus").get("search").get("metric_type"),
     )
 
     # -- Insert data
