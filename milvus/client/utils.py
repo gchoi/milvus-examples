@@ -49,8 +49,11 @@ def create_collection(
     overwrite: bool = False,
     collection_type: str = "semantic_search",
     dense_search_metric_type: str = "IP",
-    sparse_search_metric_type: str = "BM25"
-) -> Optional[Collection]:
+    sparse_search_metric_type: str = "BM25",
+    vector_field_name: str = "vector",
+    auto_id: bool = True,
+    enable_dynamic_field: bool = True
+) -> Optional[MilvusClient | Collection]:
     """
         Create Collection
 
@@ -75,13 +78,23 @@ def create_collection(
                 Sparse metric type for text search. (default: ``BM25``)
             dense_dim (int):
                 Dense dimension for hybrid search.
-    """
-    if overwrite:
-        drop_collection(collection_name=collection_name, uri=uri)
+            vector_field_name (str):
+                Name of the vector field. (default: ``vector``)
+            auto_id (bool):
+                Whether to use auto-generated IDs. (default: ``True``)
+            enable_dynamic_field (bool):
+                Whether to enable dynamic fields. (default: ``True``)
 
+        Returns:
+            Optional[MilvusClient | Collection]:
+                MilvusClient or Collection object.
+    """
     client = MilvusClient(uri=uri, token="root:Milvus")
 
-    collection = None
+    if overwrite:
+        if client.has_collection(collection_name=collection_name):
+            logger.info(f"Collection '{collection_name}' removed.")
+            client.drop_collection(collection_name=collection_name)
 
     match collection_type:
         case "semantic_search":
@@ -91,6 +104,8 @@ def create_collection(
                 metric_type=dense_search_metric_type,
                 consistency_level=consistency_level,
             )
+            logger.info(f"Collection '{collection_name}' created.")
+            return client
 
         case "full_text_search":
             # -- schema
@@ -150,6 +165,8 @@ def create_collection(
                 schema=schema,
                 index_params=index_params,
             )
+            logger.info(f"Collection '{collection_name}' created.")
+            return client
 
         case "hybrid_search":
             # Specify the data schema for the new Collection
@@ -180,12 +197,23 @@ def create_collection(
                 "metric_type": dense_search_metric_type
             }
             collection.create_index(field_name="dense_vector", index_params=dense_index)
+            logger.info(f"Collection '{collection_name}' created.")
+            return collection
+
+        case "image_search":
+            client.create_collection(
+                collection_name=collection_name,
+                vector_field_nam=vector_field_name,
+                dimension=embedding_dim,
+                auto_id=auto_id,
+                enable_dynamic_field=enable_dynamic_field,
+                metric_type=dense_search_metric_type
+            )
+            logger.info(f"Collection '{collection_name}' created.")
+            return client
 
         case _:
             raise ValueError(f"Unsupported collection type: {collection_type}")
-
-    logger.info(f"Collection '{collection_name}' created.")
-    return collection
 
 
 def insert(uri: str, collection_name: str, data: List[Dict]) -> None:
@@ -197,7 +225,7 @@ def insert(uri: str, collection_name: str, data: List[Dict]) -> None:
                 Milvus URI.
             collection_name (str):
                 milvus에 지정할 collection_name 객체.
-            data (List[Dict])):
+            data (List[Dict]):
                 Data to be inserted.
     """
 
@@ -291,6 +319,15 @@ def search(
                 ranker=RRFRanker(),  # Reciprocal Rank Fusion for combining results
                 limit=limit,
                 output_fields=["content", "metadata"],
+            )
+
+        case "image_search":
+            search_res = client.search(
+                collection_name=collection_name,
+                data=query_embeddings,
+                limit=limit,
+                search_params={"metric_type": dense_search_metric_type, "params": {}},  # Inner product distance
+                output_fields=output_fields
             )
 
         case _:

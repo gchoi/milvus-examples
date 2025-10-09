@@ -1,4 +1,5 @@
 import os
+import time
 
 from milvus.client.utils import (
     create_collection,
@@ -81,6 +82,7 @@ def main():
         )
 
     insert(uri=uri, collection_name=collection_name, data=entities)
+    time.sleep(3)
 
 
     ########################################################################
@@ -106,6 +108,8 @@ def main():
         )
         if len(sparse_results) > 0 or trial > MAX_TRIALS:
             break
+        else:
+            time.sleep(1)
 
     sparse_results = sparse_results[0]
 

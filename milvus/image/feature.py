@@ -1,3 +1,4 @@
+import PIL
 import timm
 import torch
 from PIL import Image
@@ -24,9 +25,8 @@ class FeatureExtractor:
         # Get the preprocessing function provided by TIMM for the model
         self.preprocess = create_transform(**config)
 
-    def __call__(self, image_path: str):
+    def get_embeddings(self, input_image: PIL.Image.Image):
         # Preprocess the input image
-        input_image = Image.open(image_path).convert("RGB")  # Convert to RGB if needed
         input_image = self.preprocess(input_image)
 
         # Convert the image to a PyTorch tensor and add a batch dimension
@@ -38,5 +38,15 @@ class FeatureExtractor:
 
         # Extract the feature vector
         feature_vector = output.squeeze().numpy()
+        embeddings = normalize(feature_vector.reshape(1, -1), norm="l2").flatten()
+        return embeddings
 
-        return normalize(feature_vector.reshape(1, -1), norm="l2").flatten()
+    def get_embedding_dim(self):
+        img = Image.new("RGB", (224, 224), color="white")
+        embeddings = self.get_embeddings(input_image=img)
+        return len(embeddings)
+
+    def __call__(self, image_path: str):
+        input_image = Image.open(image_path).convert("RGB")  # Convert to RGB if needed
+        embeddings = self.get_embeddings(input_image=input_image)
+        return embeddings
