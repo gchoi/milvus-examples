@@ -18,7 +18,7 @@ def main():
     ########################################################################
 
     # -- Get configurations
-    config_path = os.path.join(os.path.dirname(__file__), "configs", "config.yaml")
+    config_path = os.path.join(os.path.dirname(__file__), "configs", "config_full_text_search.yaml")
     configs = get_configurations(config_yaml_path=config_path)
 
     # -- Milvus configurations
