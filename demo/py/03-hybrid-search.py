@@ -3,70 +3,20 @@ import pathlib
 
 import pandas as pd
 
-from milvus.client.utils import create_collection, insert, search
-from milvus.model import Model
+from milvus.client.utils import create_collection, search_from_collection
 from milvus.utils import get_configurations
 from pymilvus.model.hybrid import BGEM3EmbeddingFunction
-from pymilvus import (
-    AnnSearchRequest,
-    WeightedRanker,
-)
 
 from milvus.utils import run_command
+from milvus.conf import Logger
 
+
+# -- logger settings
+logger = Logger(env="dev")
 
 MAX_TRIALS = 10
 ROOT = pathlib.Path(__file__).resolve().parent
-
-
-def dense_search(col, query_dense_embedding, limit=10):
-    search_params = {"metric_type": "IP", "params": {}}
-    res = col.search(
-        [query_dense_embedding],
-        anns_field="dense_vector",
-        limit=limit,
-        output_fields=["text"],
-        param=search_params,
-    )[0]
-    return [hit.get("text") for hit in res]
-
-
-def sparse_search(col, query_sparse_embedding, limit=10):
-    search_params = {
-        "metric_type": "IP",
-        "params": {},
-    }
-    res = col.search(
-        [query_sparse_embedding],
-        anns_field="sparse_vector",
-        limit=limit,
-        output_fields=["text"],
-        param=search_params,
-    )[0]
-    return [hit.get("text") for hit in res]
-
-
-def hybrid_search(
-    col,
-    query_dense_embedding,
-    query_sparse_embedding,
-    sparse_weight=1.0,
-    dense_weight=1.0,
-    limit=10,
-):
-    dense_search_params = {"metric_type": "IP", "params": {}}
-    dense_req = AnnSearchRequest(
-        [query_dense_embedding], "dense_vector", dense_search_params, limit=limit
-    )
-    sparse_search_params = {"metric_type": "IP", "params": {}}
-    sparse_req = AnnSearchRequest(
-        [query_sparse_embedding], "sparse_vector", sparse_search_params, limit=limit
-    )
-    rerank = WeightedRanker(sparse_weight, dense_weight)
-    res = col.hybrid_search(
-        [sparse_req, dense_req], rerank=rerank, limit=limit, output_fields=["text"]
-    )[0]
-    return [hit.get("text") for hit in res]
+DATA_DIR = os.path.join("..", "..", "data")
 
 
 def doc_text_formatting(ef, query, docs):
@@ -101,7 +51,7 @@ def doc_text_formatting(ef, query, docs):
                 close = not close
                 ldx = ldx + 1
             formatted_text += c
-        if close is True:
+        if close:
             formatted_text += "</span>"
         formatted_texts.append(formatted_text)
     return formatted_texts
@@ -117,33 +67,30 @@ def main():
     configs = get_configurations(config_yaml_path=config_path)
 
     # -- Milvus configurations
-    uri = f"{configs.get('milvus').get('host')}:{configs.get('milvus').get('port')}"
-    if not uri.startswith("http://"):
-        uri = f"http://{uri}"
+    uri = configs.get('milvus').get("uri")
     collection_name = configs.get("milvus").get("collection_name")
-
-    # -- Model configurations
-    model = Model(
-        platform=configs.get("model").get("platform"),
-        embedding_model=configs.get("model").get("embedding_model"),
-        chat_model=configs.get("model").get("chat_model"),
-    )
 
 
     ########################################################################
     # Download Dataset
     ########################################################################
 
-    file_path = "quora_duplicate_questions.tsv"
-    if not os.path.exists(path=file_path):
-        run_command(cmd="wget http://qim.fs.quoracdn.net/quora_duplicate_questions.tsv", cwd=ROOT)
+    FILENAME = "quora_duplicate_questions.tsv"
+    DATA_DEST = os.path.join(DATA_DIR, FILENAME)
+    if not os.path.exists(path=DATA_DEST):
+        logger.info(f"Downloading {FILENAME}...")
+        os.makedirs(DATA_DIR, exist_ok=True)
+        cmd = f"wget http://qim.fs.quoracdn.net/{FILENAME}"
+        run_command(cmd=cmd, cwd=ROOT)
+        cmd = f"mv {FILENAME} {DATA_DIR}/{FILENAME}"
+        run_command(cmd=cmd, cwd=ROOT)
 
 
     ########################################################################
     # Load and Prepare Data
     ########################################################################
 
-    df = pd.read_csv(file_path, sep="\t")
+    df = pd.read_csv(DATA_DEST, sep="\t")
     questions = set()
     for _, row in df.iterrows():
         obj = row.to_dict()
@@ -153,8 +100,7 @@ def main():
             break
 
     docs = list(questions)
-
-    print(f"Example question: {docs[0]}")
+    logger.info(f"Example question: {docs[0]}")
 
 
     ########################################################################
@@ -162,7 +108,7 @@ def main():
     ########################################################################
 
     ef = BGEM3EmbeddingFunction(use_fp16=False, device="cpu")
-    dense_dim = ef.dim["dense"]
+    dense_dim = ef.dim.get("dense")
 
     docs_embeddings = ef(docs)
 
@@ -181,14 +127,22 @@ def main():
     ########################################################################
     # Insert Data into Milvus Collection
     ########################################################################
+    batched_entities = []
     for i in range(0, len(docs), 50):
+        batched_entities.append(
+            {
+                "text": docs[i],
+                "sparse_vector": docs_embeddings.get("sparse")[i],
+                "dense_vector": docs_embeddings.get("dense")[i]
+            }
+        )
         batched_entities = [
             docs[i : i + 50],
             docs_embeddings["sparse"][i : i + 50],
             docs_embeddings["dense"][i : i + 50],
         ]
-        collection.insert(data=batched_entities)
-    print("Number of entities inserted:", collection.num_entities)
+        logger.debug(collection.insert(data=batched_entities))
+    logger.info(f"Number of entities inserted: {collection.num_entities}")
 
 
     ########################################################################
@@ -198,21 +152,34 @@ def main():
     query = "How to start learning programming?"
     query_embeddings = ef([query])
 
-    print(f"query: {query}")
-    print(f"query_embeddings: {query_embeddings}")
+    logger.debug(f"query: {query}")
+    logger.debug(f"query_embeddings: {query_embeddings}")
 
     ########################################################################
     # Run the Search
     ########################################################################
 
-    dense_results = dense_search(col=collection, query_dense_embedding=query_embeddings["dense"][0])
-    sparse_results = sparse_search(col=collection, query_sparse_embedding=query_embeddings["sparse"][[0]])
-    hybrid_results = hybrid_search(
+    dense_results = search_from_collection(
         col=collection,
+        search_type="dense_search",
+        query_dense_embedding=query_embeddings["dense"][0],
+        dense_metric_type="IP"
+    )
+    sparse_results = search_from_collection(
+        col=collection,
+        search_type="sparse_search",
+        query_sparse_embedding=query_embeddings["sparse"][[0]],
+        sparse_metric_type="IP"
+    )
+    hybrid_results = search_from_collection(
+        col=collection,
+        search_type="hybrid_search",
         query_dense_embedding=query_embeddings["dense"][0],
         query_sparse_embedding=query_embeddings["sparse"][[0]],
-        sparse_weight=0.7,
+        dense_metric_type="IP",
+        sparse_metric_type="IP",
         dense_weight=1.0,
+        sparse_weight=0.7
     )
 
     ########################################################################
@@ -220,19 +187,28 @@ def main():
     ########################################################################
 
     # Dense search results
-    print("**Dense Search Results:**")
+    print()
+    print("*" * 100)
+    print("Dense Search Results:")
+    print("*" * 100)
     formatted_results = doc_text_formatting(ef=ef, query=query, docs=dense_results)
-    for result in dense_results:
+    for result in formatted_results:
         print(result)
 
     # Sparse search results
-    print("\n**Sparse Search Results:**")
+    print()
+    print("*" * 100)
+    print("Sparse Search Results:")
+    print("*" * 100)
     formatted_results = doc_text_formatting(ef=ef, query=query, docs=sparse_results)
     for result in formatted_results:
         print(result)
 
     # Hybrid search results
-    print("\n**Hybrid Search Results:**")
+    print()
+    print("*" * 100)
+    print("Hybrid Search Results:")
+    print("*" * 100)
     formatted_results = doc_text_formatting(ef=ef, query=query, docs=hybrid_results)
     for result in formatted_results:
         print(result)

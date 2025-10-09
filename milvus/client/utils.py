@@ -1,19 +1,18 @@
 from typing import List, Dict, Union, Optional
 
+import numpy as np
 from pymilvus import (
     MilvusClient,
     DataType,
     Function,
     FunctionType,
-    AnnSearchRequest,
-    RRFRanker,
-)
-from pymilvus import (
     connections,
-    utility,
     FieldSchema,
     CollectionSchema,
     Collection,
+    AnnSearchRequest,
+    RRFRanker,
+    WeightedRanker,
 )
 
 from ..conf import Logger
@@ -299,3 +298,85 @@ def search(
 
     logger.info(f"Search results: {search_res}")
     return search_res
+
+
+def search_from_collection(
+    col: Collection,
+    search_type: str,
+    query_dense_embedding: np.ndarray = np.zeros(1),
+    query_sparse_embedding: np.ndarray = np.zeros(1),
+    dense_metric_type: str = "IP",
+    sparse_metric_type: str = "IP",
+    dense_weight: float = 1.0,
+    sparse_weight: float = 1.0,
+    limit: int = 10,
+    params: Optional[Dict] = None
+):
+    if params is None:
+        params = {}
+
+    res = None
+    match search_type:
+        case "dense_search":
+            search_params = {
+                "metric_type": dense_metric_type,
+                "params": params
+            }
+            res = col.search(
+                data=[query_dense_embedding],
+                anns_field="dense_vector",
+                param=search_params,
+                limit=limit,
+                output_fields=["text"],
+            )[0]
+            res = [hit.get("text") for hit in res]
+
+        case "sparse_search":
+            search_params = {
+                "metric_type": sparse_metric_type,
+                "params": params
+            }
+            res = col.search(
+                data=[query_sparse_embedding],
+                anns_field="sparse_vector",
+                param=search_params,
+                limit=limit,
+                output_fields=["text"],
+            )[0]
+            res = [hit.get("text") for hit in res]
+
+        case "hybrid_search":
+            dense_search_params = {
+                "metric_type": dense_metric_type,
+                "params": params
+            }
+            sparse_search_params = {
+                "metric_type": sparse_metric_type,
+                "params": params
+            }
+
+            dense_req = AnnSearchRequest(
+                data=[query_dense_embedding],
+                anns_field="dense_vector",
+                param=dense_search_params,
+                limit=limit
+            )
+            sparse_req = AnnSearchRequest(
+                data=[query_sparse_embedding],
+                anns_field="sparse_vector",
+                param=sparse_search_params,
+                limit=limit
+            )
+
+            rerank = WeightedRanker(sparse_weight, dense_weight)
+            res = col.hybrid_search(
+                reqs=[sparse_req, dense_req],
+                rerank=rerank,
+                limit=limit,
+                output_fields=["text"]
+            )[0]
+            res = [hit.get("text") for hit in res]
+
+        case _:
+            raise ValueError(f"Unsupported collection type: {search_type}")
+    return res
