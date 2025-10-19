@@ -1,8 +1,10 @@
 import os
+from glob import glob
 from pathlib import Path
-import torch
-from visual_bge.modeling import Visualized_BGE
 
+import torch
+from transformers import AutoModel
+from tqdm import tqdm
 from milvus.utils import get_configurations, run_command
 
 
@@ -10,6 +12,26 @@ ROOT = Path(__file__).resolve().parent
 DATA_DIR = os.path.join("..", "..", "data")
 MODEL_DIR = os.path.join("..", "..", "models")
 MAX_TRIALS = 10
+
+
+class Encoder:
+    def __init__(self, model_name: str):
+        self.model = AutoModel.from_pretrained(
+            pretrained_model_name_or_path=model_name,
+            trust_remote_code=True
+        )  # You must set trust_remote_code=True
+        self.model.set_processor(model_name)
+        self.model.eval()
+
+    def encode_query(self, image_path: str, text: str) -> list[float]:
+        with torch.no_grad():
+            query_emb = self.model.encode(image=image_path, text=text)
+        return query_emb.tolist()[0]
+
+    def encode_image(self, image_path: str) -> list[float]:
+        with torch.no_grad():
+            query_emb = self.model.encode(images=[image_path])
+        return query_emb[0].tolist()
 
 
 def main():
@@ -63,6 +85,36 @@ def main():
 
         cmd = f"mv ./{MODEL_NAME} {MODEL_DIR}"
         run_command(cmd=cmd, cwd=ROOT)
+
+    ########################################################################
+    # Load Embedding Model
+    ########################################################################
+
+    model_name = "BAAI/BGE-VL-base"
+    encoder = Encoder(model_name=model_name)
+
+    ########################################################################
+    # Generate embeddings
+    ########################################################################
+
+    # Generate embeddings for the image dataset
+    data_dir = os.path.join(DATA_DIR, "images_folder")
+    image_list = glob(os.path.join(data_dir, "images", "*.jpg"))  # We will only use images ending with ".jpg"
+    image_dict = {}
+    for image_path in tqdm(image_list, desc="Generating image embeddings: "):
+        try:
+            image_dict[image_path] = encoder.encode_image(image_path)
+        except Exception as e:
+            print(f"Failed to generate embedding for {image_path}. Skipped.")
+            continue
+    print("Number of encoded images:", len(image_dict))
+
+
+    ########################################################################
+    # Insert into Milvus
+    ########################################################################
+
+
 
     return
 
