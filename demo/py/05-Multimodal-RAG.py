@@ -1,15 +1,18 @@
 import os
+import time
 from glob import glob
 from pathlib import Path
 
 import torch
 from transformers import AutoModel
 from tqdm import tqdm
+
 from milvus.utils import get_configurations, run_command
+from milvus.client.utils import create_collection, insert, search
 
 
 ROOT = Path(__file__).resolve().parent
-DATA_DIR = os.path.join("..", "..", "data")
+DATA_DIR_ROOT = os.path.join("..", "..", "data")
 MODEL_DIR = os.path.join("..", "..", "models")
 MAX_TRIALS = 10
 
@@ -25,7 +28,7 @@ class Encoder:
 
     def encode_query(self, image_path: str, text: str) -> list[float]:
         with torch.no_grad():
-            query_emb = self.model.encode(image=image_path, text=text)
+            query_emb = self.model.encode(images=image_path, text=text)
         return query_emb.tolist()[0]
 
     def encode_image(self, image_path: str) -> list[float]:
@@ -54,7 +57,7 @@ def main():
     ########################################################################
 
     FILENAME = "amazon_reviews_2023_subset.tar.gz"
-    DATA_DEST = os.path.join(DATA_DIR, FILENAME.split(".tar.gz")[0])
+    DATA_DEST = os.path.join(DATA_DIR_ROOT, FILENAME.split(".tar.gz")[0])
 
     if not os.path.exists(path=DATA_DEST):
         os.makedirs(DATA_DEST, exist_ok=True)
@@ -98,8 +101,8 @@ def main():
     ########################################################################
 
     # Generate embeddings for the image dataset
-    data_dir = os.path.join(DATA_DIR, "images_folder")
-    image_list = glob(os.path.join(data_dir, "images", "*.jpg"))  # We will only use images ending with ".jpg"
+    data_dir = os.path.join(DATA_DIR_ROOT, "amazon_reviews_2023_subset", "images")
+    image_list = glob(os.path.join(data_dir, "images","*.jpg"))  # We will only use images ending with ".jpg"
     image_dict = {}
     for image_path in tqdm(image_list, desc="Generating image embeddings: "):
         try:
@@ -109,13 +112,62 @@ def main():
             continue
     print("Number of encoded images:", len(image_dict))
 
+    ########################################################################
+    # Create a Milvus Collection
+    ########################################################################
+
+    embedding_dim = len(image_dict.get([*image_dict.keys()][0]))
+    create_collection(
+        uri=uri,
+        collection_name=collection_name,
+        embedding_dim=embedding_dim,
+        overwrite=True,
+        collection_type="image_search",
+        dense_search_metric_type=configs.get("milvus").get("search").get("metric_type"),
+        vector_field_name="vector",
+        auto_id=True,
+        enable_dynamic_field=True,
+    )
+
 
     ########################################################################
     # Insert into Milvus
     ########################################################################
 
+    entities = [{"image_path": k, "vector": v} for k, v in image_dict.items()]
+    insert(uri=uri, collection_name=collection_name, data=entities)
 
 
+    ########################################################################
+    # Run search
+    ########################################################################
+
+    query_image = os.path.join(data_dir, "leopard.jpg")  # Change to your own query image path
+    query_text = "phone case with this image theme"
+
+    # Generate the query embedding given image and text instructions
+    query_vec = encoder.encode_query(image_path=query_image, text=query_text)
+
+    trial = 0
+    while True:
+        trial = trial + 1
+        search_results = search(
+            uri=uri,
+            collection_name=collection_name,
+            queries=[],
+            query_embeddings=[query_vec],
+            limit=configs.get("milvus").get("search").get("limit"),
+            search_type="semantic_search",
+            dense_search_metric_type=configs.get("milvus").get("search").get("metric_type"),
+        )
+        if len(search_results[0]) > 0 or trial > MAX_TRIALS:
+            break
+        else:
+            time.sleep(1)
+
+    search_results = search_results[0]
+    retrieved_images = [hit.get("entity").get("image_path") for hit in search_results]
+    print(retrieved_images)
     return
 
 if __name__ == "__main__":
