@@ -1,5 +1,5 @@
 import os
-import pathlib
+from pathlib import Path
 import time
 
 from PIL import Image
@@ -9,7 +9,7 @@ from milvus.utils import get_configurations, run_command
 from milvus.image import FeatureExtractor
 
 
-ROOT = pathlib.Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent
 DATA_DIR = os.path.join("..", "..", "data")
 MAX_TRIALS = 10
 
