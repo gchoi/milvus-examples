@@ -112,20 +112,72 @@ def main():
             continue
     print("Number of encoded images:", len(image_dict))
 
+    #--------------------------------------------------------------------------------------------------------------
+    embedding_dim = len(image_dict.get([*image_dict.keys()][0]))
+    from pymilvus import MilvusClient
+
+    collection_name = "multimodal_rag"
+
+    # Connect to Milvus client given URI
+    milvus_client = MilvusClient(uri=uri)
+    milvus_client.drop_collection(collection_name=collection_name)
+
+    # Create Milvus Collection
+    # By default, vector field name is "vector"
+    milvus_client.create_collection(
+        collection_name=collection_name,
+        auto_id=True,
+        dimension=embedding_dim,
+        enable_dynamic_field=True,
+    )
+
+    # Insert data into collection
+    milvus_client.insert(
+        collection_name=collection_name,
+        data=[{"image_path": k, "vector": v} for k, v in image_dict.items()],
+    )
+
+    query_image = os.path.join(data_dir, "leopard.jpg")  # Change to your own query image path
+    query_text = "phone case with this image theme"
+
+    # Generate query embedding given image and text instructions
+    query_vec = encoder.encode_query(image_path=query_image, text=query_text)
+
+    trial = 0
+    while True:
+        trial = trial + 1
+        search_results = milvus_client.search(
+            collection_name=collection_name,
+            data=[query_vec],
+            output_fields=["image_path"],
+            limit=9,  # Max number of search results to return
+            search_params={"metric_type": "COSINE", "params": {}},  # Search parameters
+        )[0]
+
+        if len(search_results) > 0 or trial > MAX_TRIALS:
+            break
+        else:
+            time.sleep(1)
+
+    retrieved_images = [hit.get("entity").get("image_path") for hit in search_results]
+    print(retrieved_images)
+    print()
+
+    # --------------------------------------------------------------------------------------------------------------
+
     ########################################################################
     # Create a Milvus Collection
     ########################################################################
 
     embedding_dim = len(image_dict.get([*image_dict.keys()][0]))
+
+    # Connect to Milvus client given URI
     create_collection(
         uri=uri,
         collection_name=collection_name,
-        embedding_dim=embedding_dim,
-        overwrite=True,
-        collection_type="image_search",
-        dense_search_metric_type=configs.get("milvus").get("search").get("metric_type"),
-        vector_field_name="vector",
+        collection_type="multimodal_search",
         auto_id=True,
+        embedding_dim=embedding_dim,
         enable_dynamic_field=True,
     )
 
@@ -134,8 +186,13 @@ def main():
     # Insert into Milvus
     ########################################################################
 
-    entities = [{"image_path": k, "vector": v} for k, v in image_dict.items()]
-    insert(uri=uri, collection_name=collection_name, data=entities)
+    data = [{"image_path": k, "vector": v} for k, v in image_dict.items()]
+    insert(
+        uri=uri,
+        collection_name=collection_name,
+        data=data,
+    )
+    time.sleep(3)
 
 
     ########################################################################
@@ -157,17 +214,24 @@ def main():
             queries=[],
             query_embeddings=[query_vec],
             limit=configs.get("milvus").get("search").get("limit"),
-            search_type="semantic_search",
+            search_type="multimodal_search",
             dense_search_metric_type=configs.get("milvus").get("search").get("metric_type"),
-        )
-        if len(search_results[0]) > 0 or trial > MAX_TRIALS:
+        )[0]
+
+        if len(search_results) > 0 or trial > MAX_TRIALS:
             break
         else:
             time.sleep(1)
 
-    search_results = search_results[0]
     retrieved_images = [hit.get("entity").get("image_path") for hit in search_results]
     print(retrieved_images)
+
+    from PIL import Image
+    Image.open(retrieved_images[0]).show()
+    Image.open(retrieved_images[1]).show()
+    Image.open(retrieved_images[2]).show()
+    Image.open(retrieved_images[3]).show()
+
     return
 
 if __name__ == "__main__":

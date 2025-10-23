@@ -173,7 +173,7 @@ def create_collection(
             fields = [
                 # Use an auto-generated id as a primary key
                 FieldSchema(name="pk", dtype=DataType.VARCHAR, is_primary=True, auto_id=True, max_length=100),
-                # Store the original text to retrieve based on semantically distance
+                # Store the original text to retrieve based on semantical distance
                 FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=512),
                 # Milvus now supports both sparse and dense vectors,
                 # we can store each in a separate field to conduct hybrid search on both vectors
@@ -200,14 +200,12 @@ def create_collection(
             logger.info(f"Collection '{collection_name}' created.")
             return collection
 
-        case "image_search":
+        case "multimodal_search":
             client.create_collection(
                 collection_name=collection_name,
-                vector_field_nam=vector_field_name,
-                dimension=embedding_dim,
                 auto_id=auto_id,
+                dimension=embedding_dim,
                 enable_dynamic_field=enable_dynamic_field,
-                metric_type=dense_search_metric_type
             )
             logger.info(f"Collection '{collection_name}' created.")
             return client
@@ -328,6 +326,15 @@ def search(
                 limit=limit,
                 search_params={"metric_type": dense_search_metric_type, "params": {}},  # Inner product distance
                 output_fields=output_fields
+            )
+
+        case "multimodal_search":
+            search_res = client.search(
+                collection_name=collection_name,
+                data=query_embeddings,
+                output_fields=["image_path"],
+                limit=limit,  # Max number of search results to return
+                search_params={"metric_type": dense_search_metric_type, "params": {}},  # Search parameters
             )
 
         case _:
