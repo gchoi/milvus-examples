@@ -1,6 +1,7 @@
 import os
 from typing import Any, Union, Optional
 import base64
+from io import BytesIO
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -78,8 +79,14 @@ class Model:
             case "openai":
                 messages = []
                 if system_prompt:
-                    messages.append({"role": "system", "content": system_prompt})
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": system_prompt
+                        }
+                    )
 
+                user_dict = {}
                 user_content = []
                 if user_prompt:
                     user_content.append({
@@ -87,13 +94,17 @@ class Model:
                         "text": user_prompt
                     })
                 if image_pil:
-                    base64_image = base64.b64encode(image_pil).decode("utf-8")
+                    buffered = BytesIO()
+                    image_pil.save(buffered, format="JPEG")
+                    base64_image = base64.b64encode(buffered.getvalue()).decode('utf-8')
                     user_content.append({
                         "type": "image_url",
                         "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
                     })
                 if len(user_content) > 0:
-                    messages.append(user_content)
+                    user_dict["role"] = "user"
+                    user_dict["content"] = user_content
+                    messages.append(user_dict)
 
                 response = OpenAI().chat.completions.create(
                     model=self.chat_model,

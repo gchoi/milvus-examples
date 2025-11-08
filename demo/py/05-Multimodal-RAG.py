@@ -3,15 +3,13 @@ import time
 from glob import glob
 from pathlib import Path
 
-import torch
-from transformers import AutoModel
 from tqdm import tqdm
 from PIL import Image
 import cv2
 
 from milvus.utils import get_configurations, run_command
 from milvus.client.utils import create_collection, insert, search
-from milvus.image import create_panoramic_view
+from milvus.image import create_panoramic_view, ImageEncoder
 from milvus.model import Model
 
 
@@ -19,26 +17,6 @@ ROOT = Path(__file__).resolve().parent
 DATA_DIR_ROOT = os.path.join("..", "..", "data")
 MODEL_DIR = os.path.join("..", "..", "models")
 MAX_TRIALS = 10
-
-
-class Encoder:
-    def __init__(self, model_name: str):
-        self.model = AutoModel.from_pretrained(
-            pretrained_model_name_or_path=model_name,
-            trust_remote_code=True
-        )  # You must set trust_remote_code=True
-        self.model.set_processor(model_name)
-        self.model.eval()
-
-    def encode_query(self, image_path: str, text: str) -> list[float]:
-        with torch.no_grad():
-            query_emb = self.model.encode(images=image_path, text=text)
-        return query_emb.tolist()[0]
-
-    def encode_image(self, image_path: str) -> list[float]:
-        with torch.no_grad():
-            query_emb = self.model.encode(images=[image_path])
-        return query_emb[0].tolist()
 
 
 def main():
@@ -96,11 +74,10 @@ def main():
 
 
     ########################################################################
-    # Load Embedding Model
+    # Load Image Encoder Model
     ########################################################################
 
-    model_name = "BAAI/BGE-VL-base"
-    encoder = Encoder(model_name=model_name)
+    encoder = ImageEncoder(model_name=configs.get("model").get("image_encoder"))
 
 
     ########################################################################
@@ -200,7 +177,7 @@ def main():
         chat_model=configs.get("model").get("chat_model"),
     )
 
-    SYSTEM_PROMPT = f"""
+    USER_PROMPT = f"""
         You are responsible for ranking results for a Composed Image Retrieval.
         The user retrieves an image with an 'instruction' indicating their retrieval intent.
         For example, if the user queries a red car with the instruction 'change this car to blue,' a similar type of car in blue would be ranked higher in the results.
@@ -210,10 +187,22 @@ def main():
         "The format of the response has to be 'Ranked list: []' with the indices in brackets as integers, followed by 'Reasons:' plus the explanation why this most fit user's query intent.
     """
 
-    response = model.process_query(system_prompt=SYSTEM_PROMPT, image_pil=panoramic_image, max_tokens=300)
+    response = model.process_query(user_prompt=USER_PROMPT, image_pil=panoramic_image, max_tokens=300)
 
+    # Parse the ranked indices from the response
+    start_idx = response.find("[")
+    end_idx = response.find("]")
+    ranked_indices_str = response[start_idx + 1 : end_idx].split(",")
+    ranked_indices = [int(index.strip()) for index in ranked_indices_str]
 
+    # extract explanation
+    explanation = response[end_idx + 1 :].strip()
+    print(explanation)
 
+    best_index = ranked_indices[0]
+    best_img = Image.open(retrieved_images[best_index])
+    best_img = best_img.resize((150, 150))
+    best_img.show()
     return
 
 if __name__ == "__main__":

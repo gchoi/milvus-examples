@@ -5,6 +5,7 @@ from PIL import Image
 from sklearn.preprocessing import normalize
 from timm.data import resolve_data_config
 from timm.data.transforms_factory import create_transform
+from transformers import AutoModel
 
 
 class FeatureExtractor:
@@ -50,3 +51,23 @@ class FeatureExtractor:
         input_image = Image.open(image_path).convert("RGB")  # Convert to RGB if needed
         embeddings = self.get_embeddings(input_image=input_image)
         return embeddings
+
+
+class ImageEncoder:
+    def __init__(self, model_name: str):
+        self.model = AutoModel.from_pretrained(
+            pretrained_model_name_or_path=model_name,
+            trust_remote_code=True
+        )  # You must set trust_remote_code=True
+        self.model.set_processor(model_name)
+        self.model.eval()
+
+    def encode_query(self, image_path: str, text: str) -> list[float]:
+        with torch.no_grad():
+            query_emb = self.model.encode(images=image_path, text=text)
+        return query_emb.tolist()[0]
+
+    def encode_image(self, image_path: str) -> list[float]:
+        with torch.no_grad():
+            query_emb = self.model.encode(images=[image_path])
+        return query_emb[0].tolist()

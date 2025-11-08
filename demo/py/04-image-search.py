@@ -65,9 +65,8 @@ def main():
         collection_name=collection_name,
         embedding_dim=embedding_dim,
         overwrite=True,
-        collection_type="image_search",
+        collection_type="multimodal_search",
         dense_search_metric_type=configs.get("milvus").get("search").get("metric_type"),
-        vector_field_name="vector",
         auto_id=True,
         enable_dynamic_field=True
     )
