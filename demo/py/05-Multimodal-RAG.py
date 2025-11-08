@@ -6,9 +6,13 @@ from pathlib import Path
 import torch
 from transformers import AutoModel
 from tqdm import tqdm
+from PIL import Image
+import cv2
 
 from milvus.utils import get_configurations, run_command
 from milvus.client.utils import create_collection, insert, search
+from milvus.image import create_panoramic_view
+from milvus.model import Model
 
 
 ROOT = Path(__file__).resolve().parent
@@ -52,6 +56,7 @@ def main():
         uri = f"http://{uri}"
     collection_name = configs.get("milvus").get("collection_name")
 
+
     ########################################################################
     # Download Dataset
     ########################################################################
@@ -89,12 +94,14 @@ def main():
         cmd = f"mv ./{MODEL_NAME} {MODEL_DIR}"
         run_command(cmd=cmd, cwd=ROOT)
 
+
     ########################################################################
     # Load Embedding Model
     ########################################################################
 
     model_name = "BAAI/BGE-VL-base"
     encoder = Encoder(model_name=model_name)
+
 
     ########################################################################
     # Generate embeddings
@@ -174,6 +181,39 @@ def main():
 
     retrieved_images = [hit.get("entity").get("image_path") for hit in search_results]
     print(retrieved_images)
+
+
+    ########################################################################
+    # Rerank with GPT-4o
+    ########################################################################
+
+    # -- Create a panoramic view
+    panoramic_image = create_panoramic_view(query_image, retrieved_images)
+    panoramic_image = Image.fromarray(cv2.cvtColor(panoramic_image, cv2.COLOR_BGR2RGB)).resize((300, 300))
+    panoramic_image.show()
+
+    # -- Rerank and explain
+    # Model configurations
+    model = Model(
+        platform=configs.get("model").get("platform"),
+        embedding_model=configs.get("model").get("embedding_model"),
+        chat_model=configs.get("model").get("chat_model"),
+    )
+
+    SYSTEM_PROMPT = f"""
+        You are responsible for ranking results for a Composed Image Retrieval.
+        The user retrieves an image with an 'instruction' indicating their retrieval intent.
+        For example, if the user queries a red car with the instruction 'change this car to blue,' a similar type of car in blue would be ranked higher in the results.
+        Now you would receive instruction and query image with blue border. Every item has its red index number in its top left. Do not misunderstand it. 
+        User instruction: {query_text} \n\n
+        Provide a new ranked list of indices from most suitable to least suitable, followed by an explanation for the top 1 most suitable item only.
+        "The format of the response has to be 'Ranked list: []' with the indices in brackets as integers, followed by 'Reasons:' plus the explanation why this most fit user's query intent.
+    """
+
+    response = model.process_query(system_prompt=SYSTEM_PROMPT, image_pil=panoramic_image, max_tokens=300)
+
+
+
     return
 
 if __name__ == "__main__":

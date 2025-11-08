@@ -1,12 +1,14 @@
 import os
-from typing import Any, Union
+from typing import Any, Union, Optional
+import base64
 
 from dotenv import load_dotenv
 from openai import OpenAI
 import google.generativeai as genai
 import ollama
-from ollama import chat, ChatResponse
+from ollama import chat
 import numpy as np
+from PIL import Image
 
 from ..conf import Logger
 
@@ -65,34 +67,61 @@ class Model:
         logger.info(f"Embedding dimension: {embedding_dim}")
         return embedding_dim
 
-    def process_query(self, system_prompt: str, user_prompt: str) -> str:
+    def process_query(
+        self,
+        system_prompt: Optional[str] = None,
+        user_prompt: Optional[str] = None,
+        image_pil: Optional[Image] = None,
+        max_tokens: int = 300
+    ) -> str:
         match self.platform.lower():
             case "openai":
+                messages = []
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+
+                user_content = []
+                if user_prompt:
+                    user_content.append({
+                        "type": "text",
+                        "text": user_prompt
+                    })
+                if image_pil:
+                    base64_image = base64.b64encode(image_pil).decode("utf-8")
+                    user_content.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+                    })
+                if len(user_content) > 0:
+                    messages.append(user_content)
+
                 response = OpenAI().chat.completions.create(
                     model=self.chat_model,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": system_prompt
-                        },
-                        {
-                            "role": "user",
-                            "content": user_prompt
-                        },
-                    ],
+                    messages=messages,
+                    max_tokens=max_tokens
                 )
                 return response.choices[0].message.content
+
             case "google":
+                parts = []
+                if system_prompt is not None and user_prompt is not None:
+                    parts = [system_prompt + user_prompt]
+                if system_prompt is not None and user_prompt is None:
+                    parts = [system_prompt]
+                if system_prompt is None and user_prompt is not None:
+                    parts = [user_prompt]
+
                 response = (
                     genai.GenerativeModel(self.chat_model).generate_content(
                         contents=[
                         {
                             "role": "user",
-                            "parts": [system_prompt + user_prompt]
+                            "parts": parts
                         }
                     ]
                 ))
                 return response.text
+
             case "ollama":
                 response = chat(
                     model=self.chat_model,

@@ -50,7 +50,6 @@ def create_collection(
     collection_type: str = "semantic_search",
     dense_search_metric_type: str = "IP",
     sparse_search_metric_type: str = "BM25",
-    vector_field_name: str = "vector",
     auto_id: bool = True,
     enable_dynamic_field: bool = True
 ) -> Optional[MilvusClient | Collection]:
