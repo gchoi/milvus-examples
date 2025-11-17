@@ -1,0 +1,13 @@
+# -- Milvus Configurations
+milvus:
+    uri: milvus.db
+    collection_name: hybrid_search
+    search:
+        limit: 5
+        metric_type: IP
+
+# -- Model Configurations
+model:
+    platform: openai    # openai | google | ollama
+    embedding_model: text-embedding-3-small
+    chat_model: gpt-3.5-turbo
