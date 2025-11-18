@@ -1,7 +1,10 @@
 # -- Milvus Configurations
 milvus:
-    uri: milvus.db
-    collection_name: graph_rag
+    host: localhost
+    port: 19530
+    entity_collection_name: graph_rag_entity
+    relation_collection_name: graph_rag_relation
+    passage_collection_name: graph_rag_passage
     search:
         limit: 5
         metric_type: IP
@@ -11,3 +14,4 @@ model:
     platform: openai    # openai | google | ollama
     embedding_model: text-embedding-3-small
     chat_model: gpt-4o
+    batch_size: 512

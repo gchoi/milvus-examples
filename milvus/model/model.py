@@ -1,10 +1,11 @@
 import os
-from typing import Any, Union, Optional
+from typing import Any, Union, Optional, Tuple
 import base64
 from io import BytesIO
 
 from dotenv import load_dotenv
 from openai import OpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 import google.generativeai as genai
 import ollama
 from ollama import chat
@@ -33,12 +34,31 @@ class Model:
                 os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
             case "google":
                 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-                pass
             case "ollama":
                 pass
             case _:
                 raise ValueError(f"Unsupported platform: {self.platform}")
         return
+
+    def get_models(self, temperature: Optional[float] = 0) -> Tuple[Any, Any]:
+        chat_model = None
+        embedding_model = None
+        match self.platform.lower():
+            case "openai":
+                chat_model = ChatOpenAI(
+                    model=self.chat_model,
+                    temperature=temperature,
+                )
+                embedding_model = OpenAIEmbeddings(
+                    model=self.embedding_model
+                )
+            case "google":
+                genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+            case "ollama":
+                pass
+            case _:
+                raise ValueError(f"Unsupported platform: {self.platform}")
+        return chat_model, embedding_model
 
     def get_text_embedding(self, text: Union[str, Any]):
         match self.platform.lower():
@@ -73,6 +93,7 @@ class Model:
         system_prompt: Optional[str] = None,
         user_prompt: Optional[str] = None,
         image_pil: Optional[Image] = None,
+        temperature: Optional[float] = 0,
         max_tokens: int = 300
     ) -> str:
         match self.platform.lower():
@@ -109,6 +130,7 @@ class Model:
                 response = OpenAI().chat.completions.create(
                     model=self.chat_model,
                     messages=messages,
+                    temperature=temperature,
                     max_tokens=max_tokens
                 )
                 return response.choices[0].message.content
