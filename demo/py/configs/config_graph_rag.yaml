@@ -1,7 +1,7 @@
 # -- Milvus Configurations
 milvus:
     uri: milvus.db
-    collection_name: hybrid_search
+    collection_name: graph_rag
     search:
         limit: 5
         metric_type: IP
@@ -10,4 +10,4 @@ milvus:
 model:
     platform: openai    # openai | google | ollama
     embedding_model: text-embedding-3-small
-    chat_model: gpt-3.5-turbo
+    chat_model: gpt-4o

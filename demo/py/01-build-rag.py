@@ -89,6 +89,7 @@ def main():
     # -- Insert data
     data = []
     for i, line in enumerate(tqdm(text_lines, desc="Creating embeddings")):
+        print(f"line: {line}")
         data.append(
             {
                 "id": i,
