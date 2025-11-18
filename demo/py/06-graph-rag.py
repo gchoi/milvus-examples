@@ -1,10 +1,9 @@
 import os
 from collections import defaultdict
-from typing import List, Literal
+from typing import List, Literal, Tuple
 
 from dotenv import load_dotenv
 from tqdm import tqdm
-import milvus
 import numpy as np
 from scipy.sparse import csr_matrix
 from langchain_core.messages import AIMessage, HumanMessage
@@ -12,6 +11,7 @@ from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplat
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain_openai import ChatOpenAI
 
+import milvus
 from milvus.utils import get_configurations
 from milvus.model import Model
 from milvus.conf import Logger
@@ -29,6 +29,133 @@ logger = Logger(env="dev")
 
 load_dotenv()
 os.environ['OPENAI_API_KEY'] = os.getenv('OPENAI_API_KEY')
+
+
+def data_preprocessing(dataset) -> Tuple[List, List, List, defaultdict, defaultdict]:
+    entityid_2_relationids = defaultdict(list)
+    relationid_2_passageids = defaultdict(list)
+
+    entities = []
+    relations = []
+    passages = []
+    for passage_id, dataset_info in enumerate(dataset):
+        passage, triplets = dataset_info["passage"], dataset_info["triplets"]
+        passages.append(passage)
+        for triplet in triplets:
+            if triplet[0] not in entities:
+                entities.append(triplet[0])
+            if triplet[2] not in entities:
+                entities.append(triplet[2])
+            relation = " ".join(triplet)
+            if relation not in relations:
+                relations.append(relation)
+                entityid_2_relationids[entities.index(triplet[0])].append(len(relations) - 1)
+                entityid_2_relationids[entities.index(triplet[2])].append(len(relations) - 1)
+            relationid_2_passageids[relations.index(relation)].append(passage_id)
+    return entities, relations, passages, entityid_2_relationids, relationid_2_passageids
+
+
+def insert_data_milvus(
+    uri: str,
+    model: Model,
+    entities: List[str],
+    relations: List[str],
+    passages: List[str],
+    entity_collection_name: str,
+    relation_collection_name: str,
+    passage_collection_name: str,
+    batch_size: int = 512,
+    metric_type: str = "IP"
+):
+    embedding_dim = len(model.get_text_embedding(text="foo"))
+
+    # Entity collection
+    create_collection(
+        uri=uri,
+        collection_name=entity_collection_name,
+        embedding_dim=embedding_dim,
+        consistency_level="Bounded",
+        overwrite=True,
+        collection_type="semantic_search",
+        dense_search_metric_type=metric_type
+    )
+    insert_data(
+        uri=uri,
+        batch_size=batch_size,
+        collection_name=entity_collection_name,
+        model=model,
+        text_list=entities,
+    )
+
+    # Relation collection
+    create_collection(
+        uri=uri,
+        collection_name=relation_collection_name,
+        embedding_dim=embedding_dim,
+        consistency_level="Bounded",
+        overwrite=True,
+        collection_type="semantic_search",
+        dense_search_metric_type=metric_type
+    )
+    insert_data(
+        uri=uri,
+        batch_size=batch_size,
+        collection_name=relation_collection_name,
+        model=model,
+        text_list=relations,
+    )
+
+    # Passage collection
+    create_collection(
+        uri=uri,
+        collection_name=passage_collection_name,
+        embedding_dim=embedding_dim,
+        consistency_level="Bounded",
+        overwrite=True,
+        collection_type="semantic_search",
+        dense_search_metric_type=metric_type
+    )
+    insert_data(
+        uri=uri,
+        batch_size=batch_size,
+        collection_name=passage_collection_name,
+        model=model,
+        text_list=passages,
+    )
+    return
+
+
+def retrieve_similarities(
+    uri: str,
+    query: str,
+    top_k: int,
+    query_ner_embeddings: List,
+    query_embedding,
+    entity_collection_name: str,
+    relation_collection_name: str,
+    metric_type: str = "IP"
+) -> Tuple:
+    entity_search_res = search(
+        uri=uri,
+        collection_name=entity_collection_name,
+        queries=[query],
+        query_embeddings=query_ner_embeddings,
+        search_type="semantic_search",
+        limit=top_k,
+        dense_search_metric_type=metric_type,
+        output_fields=["id"]
+    )
+    relation_search_res = search(
+        uri=uri,
+        collection_name=relation_collection_name,
+        queries=[query],
+        query_embeddings=[query_embedding],
+        search_type="semantic_search",
+        limit=top_k,
+        dense_search_metric_type=metric_type,
+        output_fields=["id"]
+    )[0]
+    return entity_search_res, relation_search_res
 
 
 def insert_data(
@@ -130,89 +257,30 @@ def main():
     # Offline Data Pre-processing
     ########################################################################
 
-    entityid_2_relationids = defaultdict(list)
-    relationid_2_passageids = defaultdict(list)
-
-    entities = []
-    relations = []
-    passages = []
-    for passage_id, dataset_info in enumerate(nano_dataset):
-        passage, triplets = dataset_info["passage"], dataset_info["triplets"]
-        passages.append(passage)
-        for triplet in triplets:
-            if triplet[0] not in entities:
-                entities.append(triplet[0])
-            if triplet[2] not in entities:
-                entities.append(triplet[2])
-            relation = " ".join(triplet)
-            if relation not in relations:
-                relations.append(relation)
-                entityid_2_relationids[entities.index(triplet[0])].append(len(relations) - 1)
-                entityid_2_relationids[entities.index(triplet[2])].append(len(relations) - 1)
-            relationid_2_passageids[relations.index(relation)].append(passage_id)
+    (
+        entities,
+        relations,
+        passages,
+        entityid_2_relationids,
+        relationid_2_passageids
+    ) = data_preprocessing(dataset=nano_dataset)
 
 
     ########################################################################
     # Data Insertion
     ########################################################################
 
-    embedding_dim = len(model.get_text_embedding(text="foo"))
-
-    # -- Create collections
-    batch_size = configs.get("model").get("batch_size")
-
-    # Entity collection
-    create_collection(
+    insert_data_milvus(
         uri=uri,
-        collection_name=configs.get("milvus").get("entity_collection_name"),
-        embedding_dim=embedding_dim,
-        consistency_level="Bounded",
-        overwrite=True,
-        collection_type="semantic_search",
-        dense_search_metric_type=configs.get("milvus").get("search").get("metric_type"),
-    )
-    insert_data(
-        uri=uri,
-        batch_size=batch_size,
-        collection_name=configs.get("milvus").get("entity_collection_name"),
         model=model,
-        text_list=entities
-    )
-
-    # Relation collection
-    create_collection(
-        uri=uri,
-        collection_name=configs.get("milvus").get("relation_collection_name"),
-        embedding_dim=embedding_dim,
-        consistency_level="Bounded",
-        overwrite=True,
-        collection_type="semantic_search",
-        dense_search_metric_type=configs.get("milvus").get("search").get("metric_type"),
-    )
-    insert_data(
-        uri=uri,
-        batch_size=batch_size,
-        collection_name=configs.get("milvus").get("relation_collection_name"),
-        model=model,
-        text_list=relations
-    )
-
-    # Passage collection
-    create_collection(
-        uri=uri,
-        collection_name=configs.get("milvus").get("passage_collection_name"),
-        embedding_dim=embedding_dim,
-        consistency_level="Bounded",
-        overwrite=True,
-        collection_type="semantic_search",
-        dense_search_metric_type=configs.get("milvus").get("search").get("metric_type"),
-    )
-    insert_data(
-        uri=uri,
-        batch_size=batch_size,
-        collection_name=configs.get("milvus").get("passage_collection_name"),
-        model=model,
-        text_list=passages
+        entities=entities,
+        relations=relations,
+        passages=passages,
+        entity_collection_name=configs.get("milvus").get("entity_collection_name"),
+        relation_collection_name=configs.get("milvus").get("relation_collection_name"),
+        passage_collection_name=configs.get("milvus").get("passage_collection_name"),
+        batch_size=configs.get("model").get("batch_size"),
+        metric_type=configs.get("milvus").get("search").get("metric_type")
     )
 
 
@@ -225,38 +293,26 @@ def main():
     top_k = configs.get("milvus").get("search").get("limit")
 
     query_ner_embeddings = [model.get_text_embedding(text=query_ner) for query_ner in query_ner_list]
-
-    entity_search_res = search(
-        uri=uri,
-        collection_name=configs.get("milvus").get("entity_collection_name"),
-        queries=[query],
-        query_embeddings=query_ner_embeddings,
-        search_type="semantic_search",
-        limit=top_k,
-        dense_search_metric_type=configs.get("milvus").get("search").get("metric_type"),
-        output_fields=["id"]
-    )
-
     query_embedding = model.get_text_embedding(text=query)
 
-    relation_search_res = search(
+    entity_search_res, relation_search_res = retrieve_similarities(
         uri=uri,
-        collection_name=configs.get("milvus").get("relation_collection_name"),
-        queries=[query],
-        query_embeddings=[query_embedding],
-        search_type="semantic_search",
-        limit=top_k,
-        dense_search_metric_type=configs.get("milvus").get("search").get("metric_type"),
-        output_fields=["id"]
-    )[0]
+        query=query,
+        top_k=top_k,
+        query_ner_embeddings=query_ner_embeddings,
+        query_embedding=query_embedding,
+        entity_collection_name=configs.get("milvus").get("entity_collection_name"),
+        relation_collection_name=configs.get("milvus").get("relation_collection_name"),
+        metric_type=configs.get("milvus").get("search").get("metric_type")
+    )
 
 
     ########################################################################
     # Expand Subgraph
     ########################################################################
 
-    # Construct the adjacency matrix of entities and relations where the value of the adjacency matrix is 1
-    # if an entity is related to a relation, otherwise 0.
+    # Construct the adjacency matrix of entities and relations
+    # where the value of the adjacency matrix is 1 if an entity is related to a relation, otherwise 0.
     entity_relation_adj = np.zeros((len(entities), len(relations)))
     for entity_id, entity in enumerate(entities):
         entity_relation_adj[entity_id, entityid_2_relationids[entity_id]] = 1
@@ -338,14 +394,19 @@ def main():
     [9] Henry II was the father of Richard the Lionheart.
     [10] Henry II was the King of England.
     [11] Richard the Lionheart led the Third Crusade.
-
     """
+
     query_prompt_one_shot_output = """
-    {"thought_process": "To answer the question about the birth of the mother of the leader of the Third Crusade, 
-    I first need to identify who led the Third Crusade and then determine who his mother was. After identifying 
-    his mother, I can look for the relationship that mentions her birth.", "useful_relationships": ["[11] Richard 
-    the Lionheart led the Third Crusade", "[7] Eleanor was the mother of Richard the Lionheart", "[1] Eleanor was born 
-    in 1122"]}
+    {
+        "thought_process": "To answer the question about the birth of the mother of the leader of the Third Crusade, 
+        I first need to identify who led the Third Crusade and then determine who his mother was. After identifying 
+        his mother, I can look for the relationship that mentions her birth.",
+        "useful_relationships": [
+            "[11] Richard the Lionheart led the Third Crusade",
+            "[7] Eleanor was the mother of Richard the Lionheart",
+            "[1] Eleanor was born in 1122"
+        ]
+    }
     """
 
     query_prompt_template = """
