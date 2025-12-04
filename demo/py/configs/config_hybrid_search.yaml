@@ -1,6 +1,7 @@
 # -- Milvus Configurations
 milvus:
-    uri: milvus.db
+    host: localhost
+    port: 19530
     collection_name: hybrid_search
     search:
         limit: 5

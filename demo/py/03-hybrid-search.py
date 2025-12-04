@@ -1,4 +1,5 @@
 import os
+import time
 import pathlib
 
 import pandas as pd
@@ -67,7 +68,9 @@ def main():
     configs = get_configurations(config_yaml_path=config_path)
 
     # -- Milvus configurations
-    uri = configs.get('milvus').get("uri")
+    uri = f"{configs.get("milvus").get("host")}:{configs.get("milvus").get("port")}"
+    if not uri.startswith("http://"):
+        uri = f"http://{uri}"
     collection_name = configs.get("milvus").get("collection_name")
 
 
@@ -159,28 +162,55 @@ def main():
     # Run the Search
     ########################################################################
 
-    dense_results = search_from_collection(
-        col=collection,
-        search_type="dense_search",
-        query_dense_embedding=query_embeddings["dense"][0],
-        dense_metric_type="IP"
-    )
-    sparse_results = search_from_collection(
-        col=collection,
-        search_type="sparse_search",
-        query_sparse_embedding=query_embeddings["sparse"][[0]],
-        sparse_metric_type="IP"
-    )
-    hybrid_results = search_from_collection(
-        col=collection,
-        search_type="hybrid_search",
-        query_dense_embedding=query_embeddings["dense"][0],
-        query_sparse_embedding=query_embeddings["sparse"][[0]],
-        dense_metric_type="IP",
-        sparse_metric_type="IP",
-        dense_weight=1.0,
-        sparse_weight=0.7
-    )
+    trial = 0
+    while True:
+        trial = trial + 1
+        dense_results = search_from_collection(
+            col=collection,
+            search_type="dense_search",
+            query_dense_embedding=query_embeddings["dense"][0],
+            dense_metric_type="IP",
+        )
+
+        if len(dense_results) > 0 or trial > MAX_TRIALS:
+            break
+        else:
+            time.sleep(1)
+
+    trial = 0
+    while True:
+        trial = trial + 1
+        sparse_results = search_from_collection(
+            col=collection,
+            search_type="sparse_search",
+            query_sparse_embedding=query_embeddings["sparse"][[0]],
+            sparse_metric_type="IP",
+        )
+
+        if len(sparse_results) > 0 or trial > MAX_TRIALS:
+            break
+        else:
+            time.sleep(1)
+
+    trial = 0
+    while True:
+        trial = trial + 1
+        hybrid_results = search_from_collection(
+            col=collection,
+            search_type="hybrid_search",
+            query_dense_embedding=query_embeddings["dense"][0],
+            query_sparse_embedding=query_embeddings["sparse"][[0]],
+            dense_metric_type="IP",
+            sparse_metric_type="IP",
+            dense_weight=1.0,
+            sparse_weight=0.7,
+        )
+
+        if len(hybrid_results) > 0 or trial > MAX_TRIALS:
+            break
+        else:
+            time.sleep(1)
+
 
     ########################################################################
     # Display Search Results
